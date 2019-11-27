@@ -9,6 +9,7 @@ open FSharp.Core.CompilerServices
 open MyNamespace
 open ProviderImplementation
 open ProviderImplementation.ProvidedTypes
+open Amazon.S3
 
 // Put any utility helpers here
 [<AutoOpen>]
@@ -25,79 +26,82 @@ type BasicErasingProvider (config : TypeProviderConfig) as this =
     // check we contain a copy of runtime files, and are not referencing the runtime DLL
     do assert (typeof<DataSource>.Assembly.GetName().Name = asm.GetName().Name)  
 
+    let getBuckets (client: AmazonS3Client) =
+        client.ListBucketsAsync() 
+            |> Async.AwaitTask 
+            |> Async.RunSynchronously
+            |> (fun arg -> arg.Buckets)
+            |> List.ofSeq
+
+    let getClient profile =
+        Environment.SetEnvironmentVariable("AWS_PROFILE", profile)
+        let config = AmazonS3Config()
+        new AmazonS3Client(config)
+
     let createTypes () =
-        let myType = ProvidedTypeDefinition(asm, ns, "MyType", Some typeof<obj>)
+        let typedS3 = ProvidedTypeDefinition(asm, ns, "Profile", Some typeof<obj>)
 
-        let ctor = ProvidedConstructor([], invokeCode = fun args -> <@@ "My internal state" :> obj @@>)
-        myType.AddMember(ctor)
+        let typeParams = [ ProvidedStaticParameter("profile", typeof<string>) ]
 
-        let ctor2 = ProvidedConstructor([ProvidedParameter("InnerState", typeof<string>)], invokeCode = fun args -> <@@ (%%(args.[0]):string) :> obj @@>)
-        myType.AddMember(ctor2)
+        let initFuncation (typeName: string) (parameters: obj[]) =
+            match parameters with
+            | [|:? string as profile|] ->
+                let typedS3Profile = ProvidedTypeDefinition(asm, ns, typeName, Some typeof<obj>)
+                typedS3Profile.AddXmlDoc(sprintf "A strongly typed interface to S3 account using .aws/config")
+            
+                typedS3Profile.AddMembersDelayed(fun() -> getClient profile |> getBuckets)
+                
+                    /// Create a nested type to represent a S3 bucket
+                    // let createTypedBucket (ownerType : ProvidedTypeDefinition) awsCred (bucket : Bucket) =
+                    //     let typedBucket = runtimeType<obj> bucket.Name
 
-        let innerState = ProvidedProperty("InnerState", typeof<string>, getterCode = fun args -> <@@ (%%(args.[0]) :> obj) :?> string @@>)
-        myType.AddMember(innerState)
+                    //     typedBucket.AddXmlDoc(sprintf "A strongly typed interface to S3 bucket %s which was created on %A" 
+                    //                                   bucket.Name bucket.CreationDate)
+                        
+                    //     let creationDate = bucket.CreationDate.ToString()
+                    //     typedBucket.AddMember(ProvidedProperty("CreationDate", typeof<DateTime>, IsStatic = true, GetterCode = (fun args -> <@@ RuntimeHelper.getDateTime(creationDate) @@>)))
+                    //     typedBucket.AddMembersDelayed(fun () -> 
+                    //         let isVersioned = isBucketVersioned awsCred bucket
+                            
+                    //         let typedSearch = createTypedSearch typedBucket awsCred bucket isVersioned
+                    //         let typedEntries = createTypedS3Entries typedBucket awsCred bucket isVersioned "" // use empty string as prefix for the top level bucket
+                                
+                    //         typedSearch :: typedEntries)
 
-        let meth = ProvidedMethod("StaticMethod", [], typeof<DataSource>, isStatic=true, invokeCode = (fun args -> Expr.Value(null, typeof<DataSource>)))
-        myType.AddMember(meth)
+                    //     typedBucket
 
-        let nameOf =
-            let param = ProvidedParameter("p", typeof<Expr<int>>)
-            param.AddCustomAttribute {
-                new CustomAttributeData() with
-                    member __.Constructor = typeof<ReflectedDefinitionAttribute>.GetConstructor([||])
-                    member __.ConstructorArguments = [||] :> _
-                    member __.NamedArguments = [||] :> _
-            }
-            ProvidedMethod("NameOf", [ param ], typeof<string>, isStatic = true, invokeCode = fun args ->
-                <@@
-                    match (%%args.[0]) : Expr<int> with
-                    | Microsoft.FSharp.Quotations.Patterns.ValueWithName (_, _, n) -> n
-                    | e -> failwithf "Invalid quotation argument (expected ValueWithName): %A" e
-                @@>)
-        myType.AddMember(nameOf)
+        // let ctor = ProvidedConstructor([], invokeCode = fun args -> <@@ "My internal state" :> obj @@>)
+        // typedS3.AddMember(ctor)
 
-        [myType]
+        // let ctor2 = ProvidedConstructor([ProvidedParameter("InnerState", typeof<string>)], invokeCode = fun args -> <@@ (%%(args.[0]):string) :> obj @@>)
+        // myType.AddMember(ctor2)
+
+        // let innerState = ProvidedProperty("InnerState", typeof<string>, getterCode = fun args -> <@@ (%%(args.[0]) :> obj) :?> string @@>)
+        // typedS3.AddMember(innerState)
+
+        // let meth = ProvidedMethod("StaticMethod", [], typeof<DataSource>, isStatic=true, invokeCode = (fun args -> Expr.Value(null, typeof<DataSource>)))
+        // typedS3.AddMember(meth)
+
+        // let nameOf =
+        //     let param = ProvidedParameter("p", typeof<Expr<int>>)
+        //     param.AddCustomAttribute {
+        //         new CustomAttributeData() with
+        //             member __.Constructor = typeof<ReflectedDefinitionAttribute>.GetConstructor([||])
+        //             member __.ConstructorArguments = [||] :> _
+        //             member __.NamedArguments = [||] :> _
+        //     }
+        //     ProvidedMethod("NameOf", [ param ], typeof<string>, isStatic = true, invokeCode = fun args ->
+        //         <@@
+        //             match (%%args.[0]) : Expr<int> with
+        //             | Microsoft.FSharp.Quotations.Patterns.ValueWithName (_, _, n) -> n
+        //             | e -> failwithf "Invalid quotation argument (expected ValueWithName): %A" e
+        //         @@>)
+        // typedS3.AddMember(nameOf)
+
+        [typedS3]
 
     do
         this.AddNamespace(ns, createTypes())
-
-[<TypeProvider>]
-type BasicGenerativeProvider (config : TypeProviderConfig) as this =
-    inherit TypeProviderForNamespaces (config, assemblyReplacementMap=[("FSharp.AWS.S3TypeProvider.DesignTime", "FSharp.AWS.S3TypeProvider.Runtime")])
-
-    let ns = "FSharp.AWS.S3TypeProvider"
-    let asm = Assembly.GetExecutingAssembly()
-
-    // check we contain a copy of runtime files, and are not referencing the runtime DLL
-    do assert (typeof<DataSource>.Assembly.GetName().Name = asm.GetName().Name)  
-
-    let createType typeName (count:int) =
-        let asm = ProvidedAssembly()
-        let myType = ProvidedTypeDefinition(asm, ns, typeName, Some typeof<obj>, isErased=false)
-
-        let ctor = ProvidedConstructor([], invokeCode = fun args -> <@@ "My internal state" :> obj @@>)
-        myType.AddMember(ctor)
-
-        let ctor2 = ProvidedConstructor([ProvidedParameter("InnerState", typeof<string>)], invokeCode = fun args -> <@@ (%%(args.[1]):string) :> obj @@>)
-        myType.AddMember(ctor2)
-
-        for i in 1 .. count do 
-            let prop = ProvidedProperty("Property" + string i, typeof<int>, getterCode = fun args -> <@@ i @@>)
-            myType.AddMember(prop)
-
-        let meth = ProvidedMethod("StaticMethod", [], typeof<DataSource>, isStatic=true, invokeCode = (fun args -> Expr.Value(null, typeof<DataSource>)))
-        myType.AddMember(meth)
-        asm.AddTypes [ myType ]
-
-        myType
-
-    let myParamType = 
-        let t = ProvidedTypeDefinition(asm, ns, "GenerativeProvider", Some typeof<obj>, isErased=false)
-        t.DefineStaticParameters( [ProvidedStaticParameter("Count", typeof<int>)], fun typeName args -> createType typeName (unbox<int> args.[0]))
-        t
-    do
-        this.AddNamespace(ns, [myParamType])
-
 
 [<TypeProviderAssembly>]
 do ()
