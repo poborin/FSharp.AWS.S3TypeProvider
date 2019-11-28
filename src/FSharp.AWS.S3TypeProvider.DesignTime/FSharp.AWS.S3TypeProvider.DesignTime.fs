@@ -10,6 +10,7 @@ open MyNamespace
 open ProviderImplementation
 open ProviderImplementation.ProvidedTypes
 open Amazon.S3
+open Amazon.S3.Model
 
 // Put any utility helpers here
 [<AutoOpen>]
@@ -38,6 +39,14 @@ type BasicErasingProvider (config : TypeProviderConfig) as this =
         let config = AmazonS3Config()
         new AmazonS3Client(config)
 
+    let createTypedBucket(ownerType: ProvidedTypeDefinition) (bucket: S3Bucket) =
+        let typedBucket = ProvidedTypeDefinition(asm, ns, "S3Bucket", Some typeof<obj>)
+        typedBucket.AddXmlDoc(sprintf "A strongly typed interface to S3 bucket %s which was created on %A"                                  bucket.BucketName bucket.CreationDate)
+
+        typedBucket.AddMember(ProvidedProperty("CreationDate", typeof<DateTime>, getterCode = (fun _ -> <@@ bucket.CreationDate @@>), isStatic = true))
+
+        typedBucket
+
     let createTypes () =
         let typedS3 = ProvidedTypeDefinition(asm, ns, "Profile", Some typeof<obj>)
 
@@ -49,26 +58,7 @@ type BasicErasingProvider (config : TypeProviderConfig) as this =
                 let typedS3Profile = ProvidedTypeDefinition(asm, ns, typeName, Some typeof<obj>)
                 typedS3Profile.AddXmlDoc(sprintf "A strongly typed interface to S3 account using .aws/config")
             
-                typedS3Profile.AddMembersDelayed(fun() -> getClient profile |> getBuckets)
-                
-                    /// Create a nested type to represent a S3 bucket
-                    // let createTypedBucket (ownerType : ProvidedTypeDefinition) awsCred (bucket : Bucket) =
-                    //     let typedBucket = runtimeType<obj> bucket.Name
-
-                    //     typedBucket.AddXmlDoc(sprintf "A strongly typed interface to S3 bucket %s which was created on %A" 
-                    //                                   bucket.Name bucket.CreationDate)
-                        
-                    //     let creationDate = bucket.CreationDate.ToString()
-                    //     typedBucket.AddMember(ProvidedProperty("CreationDate", typeof<DateTime>, IsStatic = true, GetterCode = (fun args -> <@@ RuntimeHelper.getDateTime(creationDate) @@>)))
-                    //     typedBucket.AddMembersDelayed(fun () -> 
-                    //         let isVersioned = isBucketVersioned awsCred bucket
-                            
-                    //         let typedSearch = createTypedSearch typedBucket awsCred bucket isVersioned
-                    //         let typedEntries = createTypedS3Entries typedBucket awsCred bucket isVersioned "" // use empty string as prefix for the top level bucket
-                                
-                    //         typedSearch :: typedEntries)
-
-                    //     typedBucket
+                typedS3Profile.AddMembersDelayed(fun() -> getClient profile |> getBuckets |> List.map (createTypedBucket typedS3Profile))
 
         // let ctor = ProvidedConstructor([], invokeCode = fun args -> <@@ "My internal state" :> obj @@>)
         // typedS3.AddMember(ctor)
