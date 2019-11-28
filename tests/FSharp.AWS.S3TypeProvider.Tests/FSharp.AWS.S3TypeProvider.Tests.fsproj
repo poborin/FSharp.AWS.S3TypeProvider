@@ -4,6 +4,7 @@
     <TargetFrameworks>netcoreapp2.0;net461</TargetFrameworks>
     <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <TargetProfile>netcore</TargetProfile>
   </PropertyGroup>
   <ItemGroup>
     <None Include="app.config" />
@@ -12,10 +13,8 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.8.0" />
-    <PackageReference Include="NUnit3TestAdapter" Version="3.10.0"/>
+    <PackageReference Include="NUnit3TestAdapter" Version="3.10.0" />
     <ProjectReference Include="..\..\src\FSharp.AWS.S3TypeProvider.Runtime\FSharp.AWS.S3TypeProvider.Runtime.fsproj">
-      <Name>FSharp.AWS.S3TypeProvider.Runtime</Name>
-      <Project>{7e90d6ce-a10b-4858-a5bc-41df7250cbca}</Project>
       <Private>True</Private>
     </ProjectReference>
   </ItemGroup>
